@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', extra='ignore')
 
     app_name: str = 'AdIntel x402 API'
-    app_version: str = '0.5.0'
+    app_version: str = '0.5.1'
     public_base_url: str = 'http://127.0.0.1:8080'
 
     x402_enabled: bool = False

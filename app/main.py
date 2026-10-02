@@ -19,7 +19,7 @@ async def _run(req, endpoint, price, ai_func, local_func, response_cls):
     rid=str(uuid.uuid4()); warning=None; provider='local'; model=None; usage=OpenRouterUsage(cost_known=True)
     if settings.ai_provider=='openrouter' and settings.openrouter_api_key and settings.openrouter_model:
         try: result,model,usage=await ai_func(req,settings); provider='openrouter'
-        except OpenRouterError as exc: result=local_func(req); provider='local_fallback'; usage=OpenRouterUsage(cost_known=False); warning=f'OpenRouter unavailable; deterministic fallback used: {str(exc)[:180]}'
+        except OpenRouterError as exc: result=local_func(req); provider='local_fallback'; usage=exc.usage or OpenRouterUsage(cost_known=False); model=exc.model; warning=f'OpenRouter unavailable; deterministic fallback used: {str(exc)[:180]}'
     else: result=local_func(req); warning='OpenRouter selected but key/model is missing; deterministic fallback used.' if settings.ai_provider=='openrouter' else None
     store.record(request_id=rid,endpoint=endpoint,provider=provider,model=model,x402_enabled=settings.x402_enabled,revenue_usd=price_float(price) if settings.x402_enabled else 0.0,ai_cost_usd=usage.cost_usd,ai_cost_known=usage.cost_known,input_tokens=usage.input_tokens,output_tokens=usage.output_tokens,total_tokens=usage.total_tokens,generation_id=usage.generation_id,vertical=req.vertical,geo=req.geo)
     return response_cls(request_id=rid,provider=provider,model=model,result=result,warning=warning)

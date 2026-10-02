@@ -1,5 +1,27 @@
-from typing import Literal
-from pydantic import BaseModel, Field, model_validator
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+def _stringify(value: Any, preferred_keys: tuple[str, ...] = ()) -> str:
+    """Normalize common LLM JSON variants into a stable string contract."""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        for key in preferred_keys + ('text', 'value', 'description', 'name', 'title'):
+            candidate = value.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+        parts = [str(v).strip() for v in value.values() if isinstance(v, (str, int, float)) and str(v).strip()]
+        if parts:
+            return ' — '.join(parts)
+    return str(value).strip()
+
+
+def _normalize_string_list(value: Any, preferred_keys: tuple[str, ...] = ()) -> Any:
+    if not isinstance(value, list):
+        return value
+    return [_stringify(item, preferred_keys) for item in value]
 
 
 class AdIntelRequest(BaseModel):
@@ -15,23 +37,42 @@ class AdIntelRequest(BaseModel):
 
     @model_validator(mode='after')
     def normalize(self):
-        self.product = self.product.strip(); self.offer = self.offer.strip(); return self
+        self.product = self.product.strip()
+        self.offer = self.offer.strip()
+        return self
 
 
 class CreativeConcept(BaseModel):
-    name: str; hook: str; visual: str; body: str; cta: str
+    name: str
+    hook: str
+    visual: str
+    body: str
+    cta: str
 
 
 class StoryboardScene(BaseModel):
-    seconds: str; visual: str; on_screen_text: str; voiceover: str
+    seconds: str
+    visual: str
+    on_screen_text: str
+    voiceover: str
 
 
 class HooksOutput(BaseModel):
     hooks: list[str] = Field(min_length=8, max_length=20)
 
+    @field_validator('hooks', mode='before')
+    @classmethod
+    def normalize_hooks(cls, value):
+        return _normalize_string_list(value, ('hook',))
+
 
 class AnglesOutput(BaseModel):
     angles: list[str] = Field(min_length=4, max_length=10)
+
+    @field_validator('angles', mode='before')
+    @classmethod
+    def normalize_angles(cls, value):
+        return _normalize_string_list(value, ('angle', 'framing'))
 
 
 class StoryboardOutput(BaseModel):
@@ -50,12 +91,52 @@ class AdIntelOutput(BaseModel):
     video_prompt: str
     compliance_notes: list[str] = Field(min_length=1, max_length=8)
 
+    @field_validator('hooks', mode='before')
+    @classmethod
+    def normalize_hooks(cls, value):
+        return _normalize_string_list(value, ('hook',))
+
+    @field_validator('angles', mode='before')
+    @classmethod
+    def normalize_angles(cls, value):
+        return _normalize_string_list(value, ('angle', 'framing'))
+
+    @field_validator('headlines', mode='before')
+    @classmethod
+    def normalize_headlines(cls, value):
+        return _normalize_string_list(value, ('headline',))
+
+    @field_validator('primary_texts', mode='before')
+    @classmethod
+    def normalize_primary_texts(cls, value):
+        return _normalize_string_list(value, ('primary_text', 'copy', 'text'))
+
+    @field_validator('compliance_notes', mode='before')
+    @classmethod
+    def normalize_compliance_notes(cls, value):
+        return _normalize_string_list(value, ('note', 'risk', 'recommendation'))
+
 
 class FullCampaignOutput(AdIntelOutput):
     strategy_summary: str
     recommended_angle: str
     audience_insights: list[str] = Field(min_length=3, max_length=8)
     testing_plan: list[str] = Field(min_length=3, max_length=8)
+
+    @field_validator('recommended_angle', mode='before')
+    @classmethod
+    def normalize_recommended_angle(cls, value):
+        return _stringify(value, ('angle', 'recommendation'))
+
+    @field_validator('audience_insights', mode='before')
+    @classmethod
+    def normalize_audience_insights(cls, value):
+        return _normalize_string_list(value, ('insight',))
+
+    @field_validator('testing_plan', mode='before')
+    @classmethod
+    def normalize_testing_plan(cls, value):
+        return _normalize_string_list(value, ('step', 'test', 'action'))
 
 
 class BasePaidResponse(BaseModel):
@@ -65,8 +146,21 @@ class BasePaidResponse(BaseModel):
     warning: str | None = None
 
 
-class HooksResponse(BasePaidResponse): result: HooksOutput
-class AnglesResponse(BasePaidResponse): result: AnglesOutput
-class StoryboardResponse(BasePaidResponse): result: StoryboardOutput
-class AdIntelResponse(BasePaidResponse): result: AdIntelOutput
-class FullCampaignResponse(BasePaidResponse): result: FullCampaignOutput
+class HooksResponse(BasePaidResponse):
+    result: HooksOutput
+
+
+class AnglesResponse(BasePaidResponse):
+    result: AnglesOutput
+
+
+class StoryboardResponse(BasePaidResponse):
+    result: StoryboardOutput
+
+
+class AdIntelResponse(BasePaidResponse):
+    result: AdIntelOutput
+
+
+class FullCampaignResponse(BasePaidResponse):
+    result: FullCampaignOutput
