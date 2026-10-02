@@ -1,116 +1,55 @@
-import json
-import re
+import json, re
 from dataclasses import dataclass
-from typing import Any
-
+from typing import Any, TypeVar
 import httpx
-
+from pydantic import BaseModel
 from .config import Settings
-from .prompting import SYSTEM_PROMPT, build_user_prompt
-from .schemas import AdIntelOutput, AdIntelRequest
+from .prompting import SYSTEM_PROMPT, build_user_prompt, build_hooks_prompt, build_angles_prompt, build_storyboard_prompt, build_full_campaign_prompt
+from .schemas import AdIntelRequest, AdIntelOutput, HooksOutput, AnglesOutput, StoryboardOutput, FullCampaignOutput
 
-
-class OpenRouterError(RuntimeError):
-    pass
-
+class OpenRouterError(RuntimeError): pass
 
 @dataclass(slots=True)
 class OpenRouterUsage:
-    cost_usd: float = 0.0
-    cost_known: bool = False
-    input_tokens: int = 0
-    output_tokens: int = 0
-    total_tokens: int = 0
-    generation_id: str | None = None
+    cost_usd: float=0.0; cost_known: bool=False; input_tokens:int=0; output_tokens:int=0; total_tokens:int=0; generation_id:str|None=None
 
+T=TypeVar('T', bound=BaseModel)
 
-def _extract_json(text: str) -> dict:
-    cleaned = text.strip()
-    if cleaned.startswith('```'):
-        cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned, flags=re.I)
-        cleaned = re.sub(r'\s*```$', '', cleaned)
-    try:
-        return json.loads(cleaned)
+def _extract_json(text:str)->dict:
+    cleaned=text.strip(); cleaned=re.sub(r'^```(?:json)?\s*','',cleaned,flags=re.I); cleaned=re.sub(r'\s*```$','',cleaned)
+    try:return json.loads(cleaned)
     except json.JSONDecodeError:
-        start = cleaned.find('{')
-        end = cleaned.rfind('}')
-        if start >= 0 and end > start:
-            return json.loads(cleaned[start:end + 1])
+        s,e=cleaned.find('{'),cleaned.rfind('}')
+        if s>=0 and e>s:return json.loads(cleaned[s:e+1])
         raise
 
+def _i(v:Any)->int:
+    try:return int(v or 0)
+    except:return 0
 
-def _as_int(value: Any) -> int:
+def _f(v:Any)->float:
+    try:return float(v or 0)
+    except:return 0.0
+
+async def _generate(req:AdIntelRequest, settings:Settings, model_type:type[T], prompt:str, temperature:float=.7)->tuple[T,str,OpenRouterUsage]:
+    if not settings.openrouter_api_key or not settings.openrouter_model: raise OpenRouterError('OpenRouter key/model is not configured')
+    headers={'Authorization':f'Bearer {settings.openrouter_api_key}','Content-Type':'application/json'}
+    if settings.app_url: headers['HTTP-Referer']=settings.app_url
+    if settings.app_title: headers['X-Title']=settings.app_title
+    body={'model':settings.openrouter_model,'messages':[{'role':'system','content':SYSTEM_PROMPT},{'role':'user','content':prompt}],'temperature':temperature,'response_format':{'type':'json_object'},'usage':{'include':True}}
     try:
-        return int(value or 0)
-    except (TypeError, ValueError):
-        return 0
+        async with httpx.AsyncClient(timeout=settings.openrouter_timeout_seconds) as client: response=await client.post(settings.openrouter_base_url.rstrip('/')+'/chat/completions',headers=headers,json=body)
+    except httpx.HTTPError as exc: raise OpenRouterError(f'OpenRouter network error: {exc}') from exc
+    if response.status_code>=400: raise OpenRouterError(f'OpenRouter HTTP {response.status_code}: {response.text[:500]}')
+    data=response.json()
+    try: output=model_type.model_validate(_extract_json(data['choices'][0]['message']['content']))
+    except Exception as exc: raise OpenRouterError(f'Invalid model output: {exc}') from exc
+    u=data.get('usage') or {}; known='cost' in u and u.get('cost') is not None; inp=_i(u.get('prompt_tokens',u.get('input_tokens'))); out=_i(u.get('completion_tokens',u.get('output_tokens')))
+    usage=OpenRouterUsage(_f(u.get('cost')) if known else 0.0,known,inp,out,_i(u.get('total_tokens')) or inp+out,response.headers.get('x-generation-id') or data.get('id'))
+    return output,data.get('model',settings.openrouter_model),usage
 
-
-def _as_float(value: Any) -> float:
-    try:
-        return float(value or 0.0)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-async def generate_openrouter(
-    req: AdIntelRequest,
-    settings: Settings,
-) -> tuple[AdIntelOutput, str, OpenRouterUsage]:
-    if not settings.openrouter_api_key or not settings.openrouter_model:
-        raise OpenRouterError('OpenRouter key/model is not configured')
-
-    headers = {
-        'Authorization': f'Bearer {settings.openrouter_api_key}',
-        'Content-Type': 'application/json',
-    }
-    if settings.app_url:
-        headers['HTTP-Referer'] = settings.app_url
-    if settings.app_title:
-        headers['X-Title'] = settings.app_title
-
-    body = {
-        'model': settings.openrouter_model,
-        'messages': [
-            {'role': 'system', 'content': SYSTEM_PROMPT},
-            {'role': 'user', 'content': build_user_prompt(req)},
-        ],
-        'temperature': 0.7,
-        'response_format': {'type': 'json_object'},
-        'usage': {'include': True},
-    }
-
-    url = settings.openrouter_base_url.rstrip('/') + '/chat/completions'
-    try:
-        async with httpx.AsyncClient(timeout=settings.openrouter_timeout_seconds) as client:
-            response = await client.post(url, headers=headers, json=body)
-    except httpx.HTTPError as exc:
-        raise OpenRouterError(f'OpenRouter network error: {exc}') from exc
-
-    if response.status_code >= 400:
-        raise OpenRouterError(f'OpenRouter HTTP {response.status_code}: {response.text[:500]}')
-
-    data = response.json()
-    try:
-        text = data['choices'][0]['message']['content']
-        output = AdIntelOutput.model_validate(_extract_json(text))
-    except Exception as exc:
-        raise OpenRouterError(f'Invalid model output: {exc}') from exc
-
-    usage_raw = data.get('usage') or {}
-    input_tokens = _as_int(usage_raw.get('prompt_tokens', usage_raw.get('input_tokens')))
-    output_tokens = _as_int(usage_raw.get('completion_tokens', usage_raw.get('output_tokens')))
-    total_tokens = _as_int(usage_raw.get('total_tokens')) or input_tokens + output_tokens
-    cost_known = 'cost' in usage_raw and usage_raw.get('cost') is not None
-    cost_usd = _as_float(usage_raw.get('cost')) if cost_known else 0.0
-
-    usage = OpenRouterUsage(
-        cost_usd=cost_usd,
-        cost_known=cost_known,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        total_tokens=total_tokens,
-        generation_id=response.headers.get('x-generation-id') or data.get('id'),
-    )
-
-    return output, data.get('model', settings.openrouter_model), usage
+async def generate_openrouter(req,s): return await _generate(req,s,AdIntelOutput,build_user_prompt(req))
+async def generate_hooks_openrouter(req,s): return await _generate(req,s,HooksOutput,build_hooks_prompt(req),.8)
+async def generate_angles_openrouter(req,s): return await _generate(req,s,AnglesOutput,build_angles_prompt(req),.75)
+async def generate_storyboard_openrouter(req,s): return await _generate(req,s,StoryboardOutput,build_storyboard_prompt(req),.7)
+async def generate_full_campaign_openrouter(req,s): return await _generate(req,s,FullCampaignOutput,build_full_campaign_prompt(req),.7)

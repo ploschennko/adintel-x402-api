@@ -40,7 +40,7 @@ def render_dashboard(stats: dict, *, service: str, network: str, price: str) -> 
         rows.append(
             '<tr>'
             f"<td>{escape(str(item.get('created_at', ''))[:19].replace('T', ' '))}</td>"
-            f"<td>{escape(str(item.get('provider', '')))}</td>"
+            f"<td>{escape(str(item.get('endpoint', '')))}</td>" f"<td>{escape(str(item.get('provider', '')))}</td>"
             f"<td>{_money(item.get('revenue_usd', 0), 4)}</td>"
             f"<td>{ai_cost}</td>"
             f"<td>{profit}</td>"
@@ -50,7 +50,7 @@ def render_dashboard(stats: dict, *, service: str, network: str, price: str) -> 
             '</tr>'
         )
     if not rows:
-        rows.append('<tr><td colspan="8">No calls recorded yet.</td></tr>')
+        rows.append('<tr><td colspan="9">No calls recorded yet.</td></tr>')
 
     unknown = int(stats.get('unmeasured_paid_calls', 0))
     unknown_note = (
@@ -88,7 +88,7 @@ th,td{{padding:10px 12px;border-bottom:1px solid #30363d;text-align:left;font-si
 </div>
 {unknown_note}
 <h2>Recent calls</h2>
-<table><thead><tr><th>UTC</th><th>Provider</th><th>Revenue</th><th>AI cost</th><th>Profit</th><th>Tokens</th><th>Vertical</th><th>GEO</th></tr></thead>
+<table><thead><tr><th>UTC</th><th>Endpoint</th><th>Provider</th><th>Revenue</th><th>AI cost</th><th>Profit</th><th>Tokens</th><th>Vertical</th><th>GEO</th></tr></thead>
 <tbody>{''.join(rows)}</tbody></table>
 <div class="note">{escape(stats['note'])}<br>Dashboard authentication uses an HttpOnly session cookie; the ADMIN_TOKEN is never put in the URL.</div>
 <script>async function logout(){{await fetch('/admin/logout',{{method:'POST'}});window.location='/admin';}}</script>

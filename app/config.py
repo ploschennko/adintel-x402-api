@@ -9,12 +9,16 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', extra='ignore')
 
     app_name: str = 'AdIntel x402 API'
-    app_version: str = '0.4.1'
+    app_version: str = '0.5.0'
     public_base_url: str = 'http://127.0.0.1:8080'
 
     x402_enabled: bool = False
     x402_network: str = 'eip155:84532'
+    x402_price_hooks: str = '$0.01'
+    x402_price_angles: str = '$0.02'
+    x402_price_storyboard: str = '$0.03'
     x402_price: str = '$0.05'
+    x402_price_full_campaign: str = '$0.10'
     pay_to_address: str = ''
     facilitator_url: str = 'https://x402.org/facilitator'
 
@@ -45,6 +49,16 @@ class Settings(BaseSettings):
             raise ValueError('ai_provider must be local or openrouter')
         return value
 
+    @property
+    def endpoint_prices(self) -> dict[str, str]:
+        return {
+            '/v1/hooks': self.x402_price_hooks,
+            '/v1/angles': self.x402_price_angles,
+            '/v1/video-storyboard': self.x402_price_storyboard,
+            '/v1/ad-intel': self.x402_price,
+            '/v1/full-campaign': self.x402_price_full_campaign,
+        }
+
     def validate_runtime(self) -> list[str]:
         warnings: list[str] = []
         if self.x402_enabled:
@@ -59,12 +73,8 @@ class Settings(BaseSettings):
                 warnings.append('OPENROUTER_API_KEY is empty; local fallback will be used.')
             if not self.openrouter_model:
                 warnings.append('OPENROUTER_MODEL is empty; local fallback will be used.')
-        insecure_admin_tokens = {
-            'change-me-before-production',
-            'change-this-to-a-long-random-string',
-            'replace-with-long-random-string',
-        }
-        if self.admin_token in insecure_admin_tokens or len(self.admin_token) < 32:
+        insecure = {'change-me-before-production','change-this-to-a-long-random-string','replace-with-long-random-string'}
+        if self.admin_token in insecure or len(self.admin_token) < 32:
             warnings.append('ADMIN_TOKEN should be a unique random secret of at least 32 characters.')
         return warnings
 

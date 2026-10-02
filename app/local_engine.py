@@ -109,3 +109,28 @@ def generate_local(req: AdIntelRequest) -> AdIntelOutput:
         video_prompt=video_prompt,
         compliance_notes=compliance[:8],
     )
+
+
+def generate_hooks_local(req):
+    from .schemas import HooksOutput
+    return HooksOutput(hooks=generate_local(req).hooks + [f'{req.product}: one more reason to stop scrolling', f'See what changes when {req.offer} leads the message'])
+
+
+def generate_angles_local(req):
+    from .schemas import AnglesOutput
+    base=generate_local(req).angles
+    return AnglesOutput(angles=base + ['Comparison angle: contrast the clearest verifiable differentiator against the status quo.'])
+
+
+def generate_storyboard_local(req):
+    from .schemas import StoryboardOutput
+    base=generate_local(req)
+    return StoryboardOutput(video_storyboard=base.video_storyboard, video_prompt=base.video_prompt)
+
+
+def generate_full_campaign_local(req):
+    from .schemas import FullCampaignOutput
+    base=generate_local(req)
+    data=base.model_dump()
+    data.update(strategy_summary=f'Lead with the clearest verifiable value in {req.offer}, then test proof-led and UGC variants for {req.audience}.', recommended_angle=base.angles[0], audience_insights=[f'{req.audience} needs a fast reason to care.', 'Concrete proof is stronger than generic hype.', f'Adapt terminology and trust cues for {req.geo}.'], testing_plan=['Test offer-first vs problem/solution hooks.', 'Test UGC visual vs clean product demonstration.', 'Keep the winner and rotate the second variable only.', 'Review results after enough impressions for a directional signal.'])
+    return FullCampaignOutput(**data)
