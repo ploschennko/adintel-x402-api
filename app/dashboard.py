@@ -5,6 +5,15 @@ def _money(value: float, digits: int = 4) -> str:
     return f'${float(value or 0):.{digits}f}'
 
 
+def _short(value: str | None, left: int = 8, right: int = 6) -> str:
+    text = str(value or '')
+    if not text:
+        return '—'
+    if len(text) <= left + right + 3:
+        return text
+    return f'{text[:left]}…{text[-right:]}'
+
+
 def render_admin_login(service: str) -> str:
     return f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -40,23 +49,30 @@ def render_dashboard(stats: dict, *, service: str, network: str, price: str) -> 
         rows.append(
             '<tr>'
             f"<td>{escape(str(item.get('created_at', ''))[:19].replace('T', ' '))}</td>"
-            f"<td>{escape(str(item.get('endpoint', '')))}</td>" f"<td>{escape(str(item.get('provider', '')))}</td>"
+            f"<td>{escape(str(item.get('endpoint', '')))}</td>"
+            f"<td>{escape(str(item.get('provider', '')))}</td>"
             f"<td>{_money(item.get('revenue_usd', 0), 4)}</td>"
             f"<td>{ai_cost}</td>"
             f"<td>{profit}</td>"
             f"<td>{token_value}</td>"
+            f"<td title='{escape(str(item.get('payer') or ''))}'>{escape(_short(item.get('payer')))}</td>"
+            f"<td title='{escape(str(item.get('tx_hash') or ''))}'>{escape(_short(item.get('tx_hash')))}</td>"
             f"<td>{escape(str(item.get('vertical', '')))}</td>"
             f"<td>{escape(str(item.get('geo', '')))}</td>"
             '</tr>'
         )
     if not rows:
-        rows.append('<tr><td colspan="9">No calls recorded yet.</td></tr>')
+        rows.append('<tr><td colspan="11">No calls recorded yet.</td></tr>')
 
     unknown = int(stats.get('unmeasured_paid_calls', 0))
     unknown_note = (
         f'<div class="banner">{unknown} older paid call(s) have no measured AI cost and are excluded from measured profit/margin.</div>'
         if unknown else ''
     )
+    backend = escape(str(stats.get('storage_backend', 'unknown')))
+    persistent = bool(stats.get('storage_persistent'))
+    storage_label = f'{backend} · ' + ('persistent' if persistent else 'ephemeral/local')
+    storage_class = 'good' if persistent else 'warn'
 
     return f'''<!doctype html>
 <html lang="en">
@@ -65,14 +81,14 @@ def render_dashboard(stats: dict, *, service: str, network: str, price: str) -> 
 <title>{escape(service)} — Economics</title>
 <style>
 body{{font-family:Inter,system-ui,sans-serif;background:#0d1117;color:#e6edf3;margin:0;padding:28px}}
-.wrap{{max-width:1260px;margin:auto}} .top{{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}} h1{{margin:0 0 6px}} .muted{{color:#8b949e}}
+.wrap{{max-width:1500px;margin:auto}} .top{{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}} h1{{margin:0 0 6px}} .muted{{color:#8b949e}}
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin:24px 0}}
 .card{{background:#161b22;border:1px solid #30363d;border-radius:14px;padding:18px}}
 .big{{font-size:28px;font-weight:750;margin-top:5px}} .good{{color:#3fb950}} .warn{{color:#d29922}}
 .banner{{background:#2d220c;border:1px solid #9e6a03;color:#e3b341;border-radius:10px;padding:10px 13px;margin:0 0 18px}}
 button{{border:1px solid #30363d;background:#161b22;color:#e6edf3;border-radius:8px;padding:8px 11px;cursor:pointer}}
-table{{width:100%;border-collapse:collapse;background:#161b22;border:1px solid #30363d;border-radius:12px;overflow:hidden}}
-th,td{{padding:10px 12px;border-bottom:1px solid #30363d;text-align:left;font-size:13px}} th{{color:#8b949e}}
+.table-wrap{{overflow-x:auto}} table{{width:100%;border-collapse:collapse;background:#161b22;border:1px solid #30363d;border-radius:12px;overflow:hidden;min-width:1250px}}
+th,td{{padding:10px 12px;border-bottom:1px solid #30363d;text-align:left;font-size:13px;white-space:nowrap}} th{{color:#8b949e}}
 .note{{margin-top:18px;color:#8b949e;font-size:13px;line-height:1.5}}
 </style></head><body><div class="wrap">
 <div class="top"><div><h1>{escape(service)}</h1><div class="muted">x402 economics dashboard · {escape(network)} · {escape(price)} per paid call</div></div><button onclick="logout()">Log out</button></div>
@@ -85,11 +101,12 @@ th,td{{padding:10px 12px;border-bottom:1px solid #30363d;text-align:left;font-si
 <div class="card"><div class="muted">Measured AI cost</div><div class="big warn">{_money(stats['measured_ai_cost_usd'], 6)}</div></div>
 <div class="card"><div class="muted">Measured profit</div><div class="big good">{_money(stats['measured_gross_profit_usd'], 4)}</div></div>
 <div class="card"><div class="muted">Measured margin</div><div class="big">{stats['measured_margin_percent']:.1f}%</div></div>
+<div class="card"><div class="muted">Storage</div><div class="big {storage_class}" style="font-size:20px">{storage_label}</div></div>
 </div>
 {unknown_note}
 <h2>Recent calls</h2>
-<table><thead><tr><th>UTC</th><th>Endpoint</th><th>Provider</th><th>Revenue</th><th>AI cost</th><th>Profit</th><th>Tokens</th><th>Vertical</th><th>GEO</th></tr></thead>
-<tbody>{''.join(rows)}</tbody></table>
+<div class="table-wrap"><table><thead><tr><th>UTC</th><th>Endpoint</th><th>Provider</th><th>Revenue</th><th>AI cost</th><th>Profit</th><th>Tokens</th><th>Payer</th><th>Tx</th><th>Vertical</th><th>GEO</th></tr></thead>
+<tbody>{''.join(rows)}</tbody></table></div>
 <div class="note">{escape(stats['note'])}<br>Dashboard authentication uses an HttpOnly session cookie; the ADMIN_TOKEN is never put in the URL.</div>
 <script>async function logout(){{await fetch('/admin/logout',{{method:'POST'}});window.location='/admin';}}</script>
 </div></body></html>'''

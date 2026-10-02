@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', extra='ignore')
 
     app_name: str = 'AdIntel x402 API'
-    app_version: str = '0.5.1'
+    app_version: str = '0.5.2'
     public_base_url: str = 'http://127.0.0.1:8080'
 
     x402_enabled: bool = False
@@ -31,7 +31,11 @@ class Settings(BaseSettings):
     app_title: str = 'AdIntel x402 API'
 
     admin_token: str = 'change-me-before-production'
+
+    # Local development fallback.
     database_path: str = 'data/adintel.sqlite3'
+    # Production database. Render's managed Postgres connection string should go here.
+    database_url: str = ''
 
     @field_validator('x402_network')
     @classmethod
@@ -59,6 +63,17 @@ class Settings(BaseSettings):
             '/v1/full-campaign': self.x402_price_full_campaign,
         }
 
+    @property
+    def database_backend(self) -> str:
+        value = self.database_url.strip().lower()
+        if value.startswith('postgres://') or value.startswith('postgresql://'):
+            return 'postgres'
+        return 'sqlite'
+
+    @property
+    def database_is_persistent(self) -> bool:
+        return self.database_backend == 'postgres'
+
     def validate_runtime(self) -> list[str]:
         warnings: list[str] = []
         if self.x402_enabled:
@@ -68,14 +83,27 @@ class Settings(BaseSettings):
                 warnings.append('PUBLIC_BASE_URL is local; Bazaar discovery needs a public HTTPS URL.')
             elif not self.public_base_url.startswith('https://'):
                 warnings.append('PUBLIC_BASE_URL should use HTTPS before public launch.')
+
         if self.ai_provider == 'openrouter':
             if not self.openrouter_api_key:
                 warnings.append('OPENROUTER_API_KEY is empty; local fallback will be used.')
             if not self.openrouter_model:
                 warnings.append('OPENROUTER_MODEL is empty; local fallback will be used.')
-        insecure = {'change-me-before-production','change-this-to-a-long-random-string','replace-with-long-random-string'}
+
+        insecure = {
+            'change-me-before-production',
+            'change-this-to-a-long-random-string',
+            'replace-with-long-random-string',
+            'replace-with-a-long-random-secret',
+        }
         if self.admin_token in insecure or len(self.admin_token) < 32:
             warnings.append('ADMIN_TOKEN should be a unique random secret of at least 32 characters.')
+
+        if self.public_base_url.startswith('https://') and self.database_backend == 'sqlite':
+            warnings.append(
+                'DATABASE_URL is not configured; SQLite is being used. On ephemeral hosts such as Render, '
+                'analytics can be lost after redeploy/restart.'
+            )
         return warnings
 
     @property
